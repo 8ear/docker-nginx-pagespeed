@@ -13,8 +13,7 @@ ENV \
         PAGESPEED_VERSION=${PAGESPEED_VERSION} \
         NGX_CACHE_PURGE_VERSION=${NGX_CACHE_PURGE_VERSION}
 
-RUN \
-        apt-get update -y &&
+RUN apt-get update -y && \
         apt-get install -y \
                 apt-utils \
                 git \
