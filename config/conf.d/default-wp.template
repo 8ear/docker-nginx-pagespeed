@@ -1,0 +1,288 @@
+#####
+# Source: https://codex.wordpress.org/Nginx
+#####
+
+# Upstream to abstract backend connection(s) for php
+upstream php {
+        server ${PHPBACKEND:-"wp:9000"};
+}
+
+# WordPress multisite subdirectory rules.
+        # Designed to be included in any server {} block.
+
+map $uri $blogname{
+    ~^(?P<blogpath>/[^/]+/)files/(.*)       $blogpath ;
+}
+
+map $blogname $blogid{
+    default -999;
+
+    #Ref: http://wordpress.org/extend/plugins/nginx-helper/
+    #include /var/www/wordpress/wp-content/plugins/nginx-helper/map.conf ;
+}
+#############################
+
+
+# Enables or disables emitting nginx version in error messages and in the “Server” response header field.
+        server_tokens off;
+# activate gzip
+        gzip on;
+        # Enables gzipping of responses for the specified MIME types in addition to “text/html”. 
+        # The special value “*” matches any MIME type (0.8.29). 
+        # Responses with the “text/html” type are always compressed.
+        gzip_types text/css text/javascript application/x-javascript application/javascript application/atom+xml application/json application/xml text/xml image/x-icon ;
+
+        # Sets the minimum length of a response that will be gzipped. 
+        # The length is determined only from the “Content-Length” response header field.
+        gzip_min_length  0;
+
+        # Sets a gzip compression level of a response. Acceptable values are in the range from 1 to 9.
+        gzip_comp_level 2;
+
+        # Sets the number and size of buffers used to compress a response. 
+        # By default, the buffer size is equal to one memory page. 
+        # This is either 4K or 8K, depending on a platform.
+        gzip_buffers 32 8k;
+
+        # Enables or disables gzipping of responses for proxied requests depending on the request and response. 
+        # The fact that the request is proxied is determined by the presence of the “Via” request header field. 
+        # The directive accepts multiple parameters:
+        gzip_proxied any;     
+
+        # Enables or disables inserting the “Vary: Accept-Encoding” response header field if the directives gzip, gzip_static, or gunzip are active.
+        gzip_vary on;
+
+# Cache
+        #move next 3 lines to /etc/nginx/nginx.conf if you want to use fastcgi_cache across many sites 
+        fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
+        fastcgi_cache_key "$scheme$request_method$host$request_uri";
+        fastcgi_cache_use_stale error timeout invalid_header http_500;
+
+# set timeouts
+        client_body_timeout 5s;
+        client_header_timeout 5s;
+
+# set limits
+        limit_conn_zone $binary_remote_addr zone=addr:10m;
+        limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+        limit_req_zone $binary_remote_addr zone=sitewide:10m rate=120r/m;
+
+
+server {
+        listen 80 default_server;
+        server_name _;
+
+        ## Your only path reference.
+        root ${WWWROOT:-"/var/www/html"};
+        ## This should be in your http block and if it is, it's not needed here.
+        index index.php;
+        # default cache
+        set $skip_cache 0;
+
+        # Add Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto HTTPS;       # https://codex.wordpress.org/Administration_Over_SSL#Using_a_Reverse_Proxy
+
+
+        # Remove X-Powered-By, which is an information leak
+        fastcgi_hide_header X-Powered-By;
+
+        ##############
+        # CACHING
+        #############
+
+        #fastcgi_cache start
+        set $no_cache 0;
+
+        # POST requests and URLs with a query string should always go to PHP
+        # if ($request_method = POST) {
+        #         allow all;
+        #         try_files $uri $uri/ /index.php?$args @robots;
+        #         access_log off;
+        #         log_not_found off;
+        # }
+
+        if ($query_string != "") {
+                set $skip_cache 1;
+        }  
+        
+        # Don't cache URIs containing the following segments
+        if ($request_uri ~* "(/wp-admin/|/xmlrpc.php|/wp-(app|cron|login|register|mail).php|wp-.*.php|/feed/|index.php|wp-comments-popup.php|wp-links-opml.php|wp-locations.php|sitemap(_index)?.xml|[a-z0-9_-]+-sitemap([0-9]+)?.xml)") {
+                set $skip_cache 1;
+        }
+
+        # Don't use the cache for logged-in users or recent commenters
+        if ($http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
+                set $skip_cache 1;
+        }
+
+        # PURGE URL to remove cache
+        location ~ /purge(/.*) {
+                fastcgi_cache_purge WORDPRESS "$scheme$request_method$host$1";
+                set $skip_cache 1;
+        }
+
+        # To support browser caching, set the correct HTTP headers for static files. 
+        # Look into the HTTP Cache-Control header, specifically the max-age setting, the Expires header, and Entity tags. 
+        # You can find a good introduction on the Mobify Developer Blog.
+        location ~* .(ogg|ogv|svg|svgz|eot|otf|woff|mp4|ttf|css|rss|atom|js|jpg|jpeg|gif|png|ico|zip|tgz|gz|rar|bz2|doc|xls|exe|ppt|tar|mid|midi|wav|bmp|rtf)$ {
+                expires max;
+                log_not_found off;
+                access_log off;
+        }
+
+
+        ###########
+        # DEFAULT
+        ###########
+
+        # # favicon
+        # location = /favicon.ico {
+        #         allow all;
+        #         log_not_found off;
+        #         access_log off;
+        # }
+
+        # config for search pages
+        location = /robots.txt {
+                # Some WordPress plugin gererate robots.txt file
+                allow all;
+                try_files $uri $uri/ /index.php?$args @robots;
+                access_log off;
+                log_not_found off;
+        }
+        # additional fallback if robots.txt doesn't exist
+        location @robots {
+                return 200 "User-agent: *\nDisallow: /wp-admin/\nAllow: /wp-admin/admin-ajax.php\n";
+        }
+
+        # Deny all attempts to access hidden files such as .htaccess, .htpasswd, .DS_Store (Mac) excepted .well-known directory.
+        # Keep logging the requests to parse later (or to pass to firewall utilities such as fail2ban)
+        location ~ /\.(?!well-known\/) {
+                deny all;
+                access_log off;
+                log_not_found off;
+        }
+
+        # Deny access to any files with a .php extension in the uploads directory for the single site
+        location /wp-content/uploads {
+                location ~ \.php$ {
+                        deny all;
+                }
+        }
+
+        # Deny access to any files with a .php extension in the uploads directory
+        # Works in sub-directory installs and also in multisite network
+        # Keep logging the requests to parse later (or to pass to firewall utilities such as fail2ban)
+        location ~* /(?:uploads|files)/.*\.php$ {
+                deny all;
+        }
+
+        # Deny public access to wp-config.php
+        location ~* wp-config.php {
+                deny all;
+        }
+
+        # Restrict access to WordPress dashboard
+        location /wp-admin {
+                # allow  192.192.9.9;
+                # deny  all;
+        }
+
+
+        ###########
+        # END DEFAULT
+        ###########
+
+
+        ###########
+        # WORDPRESS SINGLE
+        ##########
+
+
+        location / {
+                # This is cool because no php is touched for static content.
+                # include the "?$args" part so non-default permalinks doesn't break when using query string
+                try_files $uri $uri/ /index.php?$args;
+
+                limit_conn addr 5;
+                limit_req zone=sitewide burst=30 nodelay;
+
+                #Deny access to wp-login.php
+                location = /wp-login.php {
+                        limit_req zone=login burst=3 nodelay;
+                        fastcgi_pass php;
+                }
+                location = /wp-admin.php {
+                        limit_req zone=login burst=3 nodelay;
+                        fastcgi_pass php;
+                }
+        }
+
+
+        location ~ \.php$ {
+                #NOTE: You should have "cgi.fix_pathinfo = 0;" in php.ini
+                include fastcgi.conf;
+                fastcgi_intercept_errors on;
+                fastcgi_pass php;
+                fastcgi_buffers 16 16k;
+                fastcgi_buffer_size 32k;
+
+                # Cache settings
+                fastcgi_cache_bypass $skip_cache;
+                fastcgi_no_cache $skip_cache;
+                fastcgi_cache WORDPRESS;
+                fastcgi_cache_valid  60m;
+        }
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+                expires max;
+                log_not_found off;
+        }
+
+
+        #############
+        # WP MULTISITE subdirectory
+        #############
+
+        # location ~ ^(/[^/]+/)?files/(.+) {
+        #         try_files /wp-content/blogs.dir/$blogid/files/$2 /wp-includes/ms-files.php?file=$2 ;
+        #         access_log off;     log_not_found off; expires max;
+        # }
+
+        # #avoid php readfile()
+        # location ^~ /blogs.dir {
+        #         internal;
+        #         alias /var/www/example.com/htdocs/wp-content/blogs.dir ;
+        #         access_log off;     log_not_found off; expires max;
+        # }
+
+        # if (!-e $request_filename) {
+        #         # Don't use `$uri` here, see https://github.com/yandex/gixy/issues/77
+        #         rewrite /wp-admin$ $scheme://$host$request_uri/ permanent;
+        #         rewrite ^(/[^/]+)?(/wp-.*) $2 last;
+        #         rewrite ^(/[^/]+)?(/.*\.php) $2 last;
+        # }
+
+        # location / {
+        #         try_files $uri $uri/ /index.php?$args ;
+        # }
+
+        # location ~ \.php$ {
+        #         try_files $uri =404;
+        #         include fastcgi_params;
+        #         fastcgi_pass php;
+        # }
+
+        #add some rules for static content expiry-headers here
+
+        # Add support for subdirectory structure in WordPress Multisite
+        # if (!-e $request_filename) {
+        #         rewrite /wp-admin$ $scheme://$host$uri/ permanent;	
+        #         rewrite ^(/[^/]+)?(/wp-.*) $2 last;                     
+        #         rewrite ^(/[^/]+)?(/.*.php) $2 last;                   
+        # }
+
+}
