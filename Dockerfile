@@ -4,45 +4,48 @@ ARG MAKE_J=4
 ARG NGINX_VERSION=1.14.0
 ARG PAGESPEED_VERSION=1.13.35.2
 ARG LIBPNG_VERSION=1.6.29
+ARG NGX_CACHE_PURGE_VERSION=2.3
 
-ENV MAKE_J=${MAKE_J} \
+ENV \
+        MAKE_J=${MAKE_J} \
         NGINX_VERSION=${NGINX_VERSION} \
         LIBPNG_VERSION=${LIBPNG_VERSION} \
-        PAGESPEED_VERSION=${PAGESPEED_VERSION}
+        PAGESPEED_VERSION=${PAGESPEED_VERSION} \
+        NGX_CACHE_PURGE_VERSION=${NGX_CACHE_PURGE_VERSION}
 
-RUN apt-get update -y && \
-        apt-get upgrade -y
+RUN \
+        apt-get update -y &&
+        apt-get install -y \
+                apt-utils \
+                git nano \
+                g++ \
+                gcc \
+                curl \
+                make \
+                unzip \
+                bzip2 \
+                gperf \
+                python \
+                openssl \
+                libuuid1 \
+                apt-utils \
+                pkg-config \
+                icu-devtools \
+                build-essential \
+                ca-certificates \
+                uuid-dev \
+                zlib1g-dev \
+                libicu-dev \
+                libssl-dev \
+                apache2-dev \
+                libpcre3 \
+                libpcre3-dev \
+                libpng-dev \
+                libaprutil1-dev \
+                linux-headers-amd64 \
+                libjpeg62-turbo-dev \
+                libcurl4-openssl-dev
 
-RUN apt-get install -y \
-        apt-utils \
-        git nano \
-        g++ \
-        gcc \
-        curl \
-        make \
-        unzip \
-        bzip2 \
-        gperf \
-        python \
-        openssl \
-        libuuid1 \
-        apt-utils \
-        pkg-config \
-        icu-devtools \
-        build-essential \
-        ca-certificates \
-        uuid-dev \
-        zlib1g-dev \
-        libicu-dev \
-        libssl-dev \
-        apache2-dev \
-        libpcre3 \
-        libpcre3-dev \
-        libpng-dev \
-        libaprutil1-dev \
-        linux-headers-amd64 \
-        libjpeg62-turbo-dev \
-        libcurl4-openssl-dev
 
 # Build libpng
 RUN cd /tmp && \
@@ -51,15 +54,25 @@ RUN cd /tmp && \
         ./configure --build=$CBUILD --host=$CHOST --prefix=/usr --enable-shared --with-libpng-compat && \
         make -j${MAKE_J} install V=0
 
+# Build Stable Pagespeed
 RUN cd /tmp && \
         curl -O -L https://github.com/pagespeed/ngx_pagespeed/archive/v${PAGESPEED_VERSION}-stable.zip && \
         unzip v${PAGESPEED_VERSION}-stable.zip
 
+# Build Incubator Pagespeed
 RUN cd /tmp/incubator-pagespeed-ngx-${PAGESPEED_VERSION}-stable/ && \
         psol_url=https://dl.google.com/dl/page-speed/psol/${PAGESPEED_VERSION}.tar.gz && \
         [ -e scripts/format_binary_url.sh ] && psol_url=$(scripts/format_binary_url.sh PSOL_BINARY_URL) && \
         echo "URL: ${psol_url}" && \
         curl -L ${psol_url} | tar -xz
+
+# Build NGINX Cache Purge Module
+RUN cd /tmp&& \
+        curl -L http://labs.frickle.com/files/ngx_cache_purge-$NGX_CACHE_PURGE_VERSION.tar.gz | tar -zx \
+	&& cd ./nginx-$NGINX_VERSION \
+	&& ./configure $CONFIG --with-debug \
+        && make -j$(getconf _NPROCESSORS_ONLN)
+	
 
 # Build in additional Nginx modules
 RUN cd /tmp && \
@@ -105,7 +118,8 @@ RUN cd /tmp && \
         --add-module=/tmp/nginx-module-vts \
         --add-module=/tmp/headers-more-nginx-module \
         --add-module=/tmp/ngx_http_substitutions_filter_module \
-        --add-module=/tmp/incubator-pagespeed-ngx-${PAGESPEED_VERSION}-stable && \
+        --add-module=/tmp/incubator-pagespeed-ngx-${PAGESPEED_VERSION}-stable \
+        --add-module=/tmp/ngx_cache_purge && \
         make install --silent
 
 # Clean-up
