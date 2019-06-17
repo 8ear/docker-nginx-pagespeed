@@ -8,15 +8,19 @@ addons:
 env:
   global:
   #- DOCKER_COMPOSE_VERSION=1.4.2
-  - COMPONENT=server
+  matrix:
+  - MAKE_J=4 NGINX_VERSION=1.14.0 PAGESPEED_VERSION=1.13.35.2 LIBPNG_VERSION=1.6.29
+
 
 script:
       - docker build
           -t "$(echo $TRAVIS_REPO_SLUG:latest | tr '[:upper:]' '[:lower:]')"
+          -t "$(echo $TRAVIS_REPO_SLUG:$NGINX_VERSION | tr '[:upper:]' '[:lower:]')"
           "$TRAVIS_BUILD_DIR/"
       - docker images
       - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
       - docker push "$TRAVIS_REPO_SLUG:latest"
+      - docker push "$TRAVIS_REPO_SLUG:$NGINX_VERSION"
     
 
 # don't notify me when things fail 
