@@ -1,0 +1,24 @@
+language: minimal
+dist: xenial
+addons:
+  apt:
+    sources:
+      - docker-xenial
+
+env:
+  global:
+  #- DOCKER_COMPOSE_VERSION=1.4.2
+  - COMPONENT=server
+
+script:
+      - docker build
+          -t "$(echo $TRAVIS_REPO_SLUG:latest | tr '[:upper:]' '[:lower:]')"
+          "$TRAVIS_BUILD_DIR/"
+      - docker images
+      - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+      - docker push "$TRAVIS_REPO_SLUG:latest"
+    
+
+# don't notify me when things fail 
+#notifications:
+#  email: false
