@@ -17,11 +17,12 @@ RUN \
         apt-get update -y &&
         apt-get install -y \
                 apt-utils \
-                git nano \
+                git \
                 g++ \
                 gcc \
                 curl \
                 make \
+                nano \
                 unzip \
                 bzip2 \
                 gperf \
